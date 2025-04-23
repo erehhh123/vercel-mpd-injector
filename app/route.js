@@ -1,35 +1,34 @@
+// app/api/mpd/route.js
 import { NextResponse } from 'next/server';
 
-export async function GET(req) {
-  const { searchParams } = new URL(req.url);
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
   const mpdUrl = searchParams.get('url');
 
   if (!mpdUrl) {
-    return new NextResponse('Missing MPD URL', { status: 400 });
+    return NextResponse.json({ error: 'Missing url parameter' }, { status: 400 });
   }
 
   try {
-    const response = await fetch(mpdUrl);
-    let mpdText = await response.text();
+    const res = await fetch(mpdUrl);
+    if (!res.ok) throw new Error(`Failed to fetch MPD: ${res.status}`);
 
-    const injected1080p = `
-      <Representation bandwidth=\"2500000\" height=\"1080\" width=\"1920\"
-        codecs=\"avc1.640032\" frameRate=\"25000/1000\" id=\"inject-1080p\" />
-    `;
+    const xml = await res.text();
 
-    // Inject into video AdaptationSet
-    mpdText = mpdText.replace(
-      /(<AdaptationSet[^>]+contentType=\"video\"[^>]*>[\s\S]*?)(<\/AdaptationSet>)/,
-      (match, start, end) => `${start}${injected1080p}${end}`
+    const injectedRep = `      <Representation bandwidth="3000000" height="1080" width="1920" codecs="avc1.640028" frameRate="25" id="1080p-injected" />\n`;
+
+    const updatedXml = xml.replace(
+      /(<AdaptationSet[^>]*contentType="video"[\s\S]*?<SegmentTemplate[\s\S]*?>)(\s*<Representation[^>]*>)/,
+      `$1\n${injectedRep}$2`
     );
 
-    return new NextResponse(mpdText, {
-      status: 200,
+    return new NextResponse(updatedXml, {
       headers: {
-        'Content-Type': 'application/dash+xml'
-      },
+        'Content-Type': 'application/dash+xml',
+        'Cache-Control': 'no-store'
+      }
     });
-  } catch (err) {
-    return new NextResponse('Error fetching or modifying MPD', { status: 500 });
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
